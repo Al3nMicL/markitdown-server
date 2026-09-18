@@ -2,182 +2,333 @@
 Purpose: This document defines the validation and acceptance gates after the project scaffolding and implementation setup are complete.
 ---
 
-# VALIDATION PHASES — POST-IMPLEMENTATION ACCEPTANCE
+# UPDATED VALIDATION PHASES — POST-IMPLEMENTATION ACCEPTANCE
 
-This playbook starts after the implementation phases have delivered a bootable SvelteKit application, the Python `markitdown` environment, the conversion route, and the basic upload UI. The goal is to confirm the system is production-ready, documented, and accepted by stakeholders before release.
-
----
-
-## VALIDATION INPUTS
-
-Before starting validation, confirm the implementation handoff includes:
-
-- a working SvelteKit app structure
-- the Python virtual environment and `MARKITDOWN_BIN` wiring
-- the upload and conversion flow in the app runtime
-- environment examples for local setup
-- a branch that contains all scaffolding and implementation changes
-
-If any input is missing, stop validation and return the work to implementation.
+This playbook begins only after the implementation phases have produced a working SvelteKit application, the Python virtual environment, the `markitdown` binary integration, the conversion route, and the initial upload UI. These steps define how to validate readiness, collect acceptance feedback, and approve the project for completion.
 
 ---
 
-## PHASE 1 — COMPLETION CRITERIA
-
-Project completion is reached only when **all** of the following criteria pass.
-
-### 1.1 Functional checks
-
-| Area | Required outcome | Acceptance signal |
-|---|---|---|
-| App bootstrap | The SvelteKit project installs, syncs, type-checks, and builds cleanly | `pnpm install`, `pnpm check`, and `pnpm build` succeed |
-| Upload flow | A user can select a supported file and submit it without UI or server errors | Manual smoke test passes in browser |
-| Conversion route | `src/routes/api/convert/+server.ts` accepts multipart form data and returns Markdown | Successful conversion response with `text/markdown` output |
-| Failure handling | Missing file, unsupported input, oversized file, and converter failure return controlled errors | No uncaught exception or blank failure state |
-| Binary integration | The app resolves `MARKITDOWN_BIN` from environment configuration and invokes the venv binary | Conversion works without manual path edits in code |
-| Cleanup behavior | Temporary conversion artifacts are removed after request completion | No leaked request files after smoke test |
-
-### 1.2 Performance benchmarks
-
-Use representative sample files that match the intended launch scope.
-
-| Benchmark | Minimum pass condition |
-|---|---|
-| Local cold start | `pnpm dev` reaches a usable state in <= 30 seconds on the validation machine |
-| Small-file conversion | A small plain-text or markdown-compatible file converts in <= 3 seconds |
-| Typical-file conversion | A representative office or document file converts in <= 10 seconds |
-| Repeated conversion stability | 5 back-to-back conversions complete without process crash, hung request, or corrupted output |
-| Build performance | `pnpm build` completes without memory-related failure and produces a deployable output |
-
-If the team decides to support larger files or higher throughput, replace these baseline numbers with stricter environment-specific targets before production approval.
-
-### 1.3 User acceptance testing
-
-The project is not complete until at least one stakeholder or designated tester confirms:
-
-- the upload flow is understandable without developer guidance
-- returned Markdown is usable for the expected downstream workflow
-- error messages are clear enough for retry or correction
-- the basic setup satisfies the agreed implementation scope
-
-Record any rejected scenario as a release blocker.
-
----
-
-## PHASE 2 — ACCEPTANCE GATES BEFORE PRODUCTION
-
-All gates below must pass in order.
-
-### Gate 2.1 — Change review gate
-
-- at least one peer review is completed on the implementation branch
-- review comments affecting correctness, security, or operability are resolved
-- no unresolved blocking conversations remain on the pull request
-
-### Gate 2.2 — Verification gate
-
-Run the smallest project-native validation set that covers the delivered work:
+## UPDATED VARIABLES (add to top of validation session)
 
 ```bash
+SERVICE_DIR="$(pwd)"
+VENV_DIR="$SERVICE_DIR/.venv"
+APP_URL="http://127.0.0.1:3000"
+API_ROUTE="/api/convert"
+MARKITDOWN_BIN="${MARKITDOWN_BIN:-$VENV_DIR/bin/markitdown}"
+MAX_FILE_MB="${MAX_FILE_MB:-100}"
+```
+
+---
+
+## UPDATED PHASE 1 — VALIDATION READINESS GATE
+
+```bash
+# ── 1.1 Confirm repository and implementation handoff ───────────────────────────
+echo "── 1.1 Confirming implementation handoff ──"
+
+test -f "$SERVICE_DIR/package.json" \
+  || { echo "✗ package.json missing"; exit 1; }
+
+test -f "$SERVICE_DIR/.agents/playbook/Implementation-Phases.md" \
+  || { echo "✗ Implementation playbook missing"; exit 1; }
+
+test -d "$VENV_DIR" \
+  || { echo "✗ Python virtual environment missing at $VENV_DIR"; exit 1; }
+
+test -x "$MARKITDOWN_BIN" \
+  || { echo "✗ markitdown binary missing or not executable at $MARKITDOWN_BIN"; exit 1; }
+
+test -f "$SERVICE_DIR/src/routes/api/convert/+server.ts" \
+  || { echo "✗ Conversion route missing"; exit 1; }
+```
+
+```bash
+# ── 1.2 Confirm baseline project commands are available ─────────────────────────
+echo ""
+echo "── 1.2 Confirming baseline toolchain ──"
+
+node --version
+pnpm --version
+python3 --version
+"$MARKITDOWN_BIN" --help >/dev/null
+```
+
+```bash
+# ── 1.3 Confirm configuration handoff artifacts ─────────────────────────────────
+echo ""
+echo "── 1.3 Confirming configuration artifacts ──"
+
+test -f "$SERVICE_DIR/.env.example" \
+  || { echo "✗ .env.example missing"; exit 1; }
+
+grep -q '^MARKITDOWN_BIN=' "$SERVICE_DIR/.env.example" \
+  || { echo "✗ .env.example does not document MARKITDOWN_BIN"; exit 1; }
+
+grep -q '^MAX_FILE_MB=' "$SERVICE_DIR/.env.example" \
+  || { echo "✗ .env.example does not document MAX_FILE_MB"; exit 1; }
+```
+
+### 1.4 Readiness gate result
+
+Validation must stop and return to implementation if any of the following are missing:
+
+- bootable SvelteKit app structure
+- working Python venv and executable `markitdown` binary
+- conversion endpoint in the SvelteKit runtime
+- environment example values for local setup
+- implementation branch containing the intended scaffolding and runtime changes
+
+### 1.5 Success criteria
+
+- all readiness checks complete without manual repair
+- all required implementation artifacts exist in the repository
+- the validation lead can proceed without guessing missing setup details
+
+---
+
+## UPDATED PHASE 2 — FUNCTIONAL + PERFORMANCE VALIDATION
+
+```bash
+# ── 2.1 Install dependencies and validate project integrity ─────────────────────
+echo "── 2.1 Installing dependencies and validating project integrity ──"
+
+cd "$SERVICE_DIR" || exit 1
 pnpm install
 pnpm check
 pnpm build
 ```
 
-Also complete:
+```bash
+# ── 2.2 Start the app for smoke testing ─────────────────────────────────────────
+echo ""
+echo "── 2.2 Starting local validation server ──"
 
-- a manual browser smoke test of upload -> convert -> output review
-- an API-level smoke test for success and failure responses
-- a validation of environment-variable setup using `.env.example`
+pnpm dev
+```
 
-### Gate 2.3 — Deployment-readiness gate
+```bash
+# ── 2.3 API smoke test scenarios to execute while dev server is running ─────────
+echo ""
+echo "── 2.3 API smoke test checklist ──"
+echo "  1) POST a valid sample file to $APP_URL$API_ROUTE"
+echo "  2) Confirm HTTP 200 and Content-Type: text/markdown; charset=utf-8"
+echo "  3) Confirm response body is non-empty markdown output"
+echo "  4) Repeat with no file and expect HTTP 400"
+echo "  5) Repeat with file > MAX_FILE_MB and expect HTTP 413"
+echo "  6) Repeat with converter failure input and confirm controlled error response"
+```
 
-Before approval to deploy:
+```bash
+# ── 2.4 Browser smoke test scenarios ────────────────────────────────────────────
+echo ""
+echo "── 2.4 Browser smoke test checklist ──"
+echo "  1) Open $APP_URL"
+echo "  2) Upload a supported sample file"
+echo "  3) Submit conversion and confirm download or rendered success state"
+echo "  4) Confirm the UI shows a clear error for empty submission"
+echo "  5) Confirm the UI remains responsive across repeated submissions"
+```
 
-- the target environment has Python, Node.js, `uv`, and the `markitdown` binary path available as documented
-- required directories, file-size limits, and environment variables are defined
-- logs and error output are visible enough to diagnose failed conversions
-- rollback or redeploy steps are known to the operator responsible for release
+### 2.5 Required validation criteria
 
-### Gate 2.4 — Release decision gate
+#### Functionality checks
+
+- the SvelteKit project installs, syncs, type-checks, and builds cleanly
+- the upload flow accepts a supported file and completes without UI or server errors
+- `src/routes/api/convert/+server.ts` accepts multipart form data and returns Markdown
+- missing file, oversized file, unsupported input, and converter failure produce controlled errors
+- the runtime resolves `MARKITDOWN_BIN` from environment configuration rather than hard-coded machine-specific paths
+- request-scoped conversion artifacts are cleaned up after the request finishes
+
+#### Performance benchmarks
+
+- `pnpm dev` reaches a usable state within 30 seconds on the validation machine
+- a small plain-text or markdown-friendly file converts within 3 seconds
+- a representative document file converts within 10 seconds
+- 5 back-to-back conversions complete without hung requests, crashes, or corrupted output
+- `pnpm build` completes successfully without memory-related failure
+
+#### User acceptance testing
+
+At least one stakeholder or designated proxy user must confirm:
+
+- the upload flow is understandable without developer assistance
+- the returned Markdown is usable for the intended downstream workflow
+- the visible error messages are actionable enough for retry or correction
+- the delivered implementation matches the agreed project scope
+
+### 2.6 Success criteria
+
+- `pnpm install`, `pnpm check`, and `pnpm build` all succeed
+- manual API and browser smoke tests pass
+- performance targets are met or explicitly revised before release approval
+- any failed UAT scenario is recorded as a release blocker
+
+---
+
+## UPDATED PHASE 3 — ACCEPTANCE GATES BEFORE PRODUCTION
+
+```bash
+# ── 3.1 Required code-review gate ───────────────────────────────────────────────
+echo "── 3.1 Code-review gate ──"
+echo "  ✓ At least one peer review completed"
+echo "  ✓ No unresolved blocking review conversations"
+echo "  ✓ Correctness, operability, and security concerns addressed"
+```
+
+```bash
+# ── 3.2 Required deployment-readiness gate ──────────────────────────────────────
+echo ""
+echo "── 3.2 Deployment-readiness gate ──"
+
+node --version
+python3 --version
+test -x "$MARKITDOWN_BIN"
+test -f "$SERVICE_DIR/.env.example"
+```
+
+### 3.3 Production gates that must pass
+
+#### Gate A — Change review gate
+
+- at least one peer review is completed on the implementation branch
+- all blocking review comments are resolved
+- no unresolved correctness or deployment objections remain
+
+#### Gate B — Verification gate
+
+- the Phase 2 validation commands complete successfully
+- the API smoke tests cover both success and failure responses
+- the browser smoke tests confirm the end-user path works as expected
+- `.env.example` accurately reflects the required runtime configuration
+
+#### Gate C — Deployment-readiness gate
+
+- the target environment has Node.js, Python, and the documented `markitdown` path available
+- file-size limits and environment variables are explicitly defined before deployment
+- operators have enough logs and error visibility to diagnose conversion failures
+- rollback or redeploy expectations are known to the release owner
+
+#### Gate D — Release decision gate
 
 Production approval requires explicit sign-off from:
 
 - implementation owner
-- reviewer or maintainer
-- product/stakeholder representative for scope acceptance
+- repository maintainer or technical reviewer
+- stakeholder or product representative accepting scope completion
 
-If any sign-off is missing, the release remains blocked.
+### 3.4 Success criteria
+
+- all four production gates pass without open blockers
+- sign-off ownership is explicit rather than assumed
+- no release proceeds on the basis of “works on my machine” validation alone
 
 ---
 
-## PHASE 3 — REQUIRED DOCUMENTATION BEFORE FINAL ACCEPTANCE
+## UPDATED PHASE 4 — DOCUMENTATION COMPLETION GATE
 
-The following documentation must exist and be current before the work is accepted:
+```bash
+# ── 4.1 Documentation inventory to confirm before acceptance ────────────────────
+echo "── 4.1 Documentation inventory ──"
+echo "  - setup guide"
+echo "  - user manual"
+echo "  - API documentation"
+echo "  - operations notes"
+echo "  - validation record"
+```
+
+### 4.2 Required documentation
 
 | Document | Minimum required content |
 |---|---|
-| Setup guide | local prerequisites, install steps, environment variables, how to start the app |
-| User manual | how to upload a file, what output to expect, known limits, common failure cases |
-| API documentation | endpoint path, request format, response format, error cases, file-size or type constraints |
-| Operations notes | location of the Python venv, `MARKITDOWN_BIN` expectations, deployment-specific considerations |
-| Validation record | commands run, smoke-test scenarios covered, benchmark results, open risks if any |
+| Setup guide | prerequisites, install steps, environment variables, how to start the SvelteKit app |
+| User manual | how to upload a file, expected output, known limits, common failure cases |
+| API documentation | endpoint path, request format, response format, error responses, size or type constraints |
+| Operations notes | location of the Python venv, `MARKITDOWN_BIN` expectations, deployment considerations |
+| Validation record | commands executed, smoke-test scenarios run, benchmark results, open risks or deferrals |
 
-Documentation is part of acceptance, not a follow-up task.
+### 4.3 Documentation rule
+
+Documentation is part of the acceptance gate. It must be complete before final approval, not scheduled as a follow-up after release.
+
+### 4.4 Success criteria
+
+- all five documentation items exist and reflect the implemented behavior
+- setup and operations guidance can be followed without tribal knowledge
+- validation evidence is recorded in a way reviewers can audit later
 
 ---
 
-## PHASE 4 — FEEDBACK MECHANISM
+## UPDATED PHASE 5 — FEEDBACK COLLECTION + DISPOSITION
 
-Collect feedback in a short, time-boxed loop after the implementation branch is deemed functionally ready.
+```bash
+# ── 5.1 Feedback timeline checkpoint ────────────────────────────────────────────
+echo "── 5.1 Feedback timeline ──"
+echo "  Day 0  : share preview build or test deployment"
+echo "  Days 1-3: collect reviewer, stakeholder, and user feedback"
+echo "  Day 4  : triage findings into must-fix / should-fix / backlog"
+echo "  Day 5  : confirm fixes or document approved deferrals"
+```
 
-### 4.1 Collection window
+### 5.2 Required feedback channels
 
-- Day 0: share the preview build or test deployment with reviewers and stakeholders
-- Days 1-3: gather feedback from implementation owner, reviewer, and at least one intended user or proxy user
-- Day 4: triage findings into must-fix, should-fix, and post-release backlog items
-- Day 5: confirm fixes or document deferrals before final sign-off
+Use existing delivery channels only:
 
-### 4.2 Feedback channels
+- pull request review comments for code-specific concerns
+- issue tracker items for defects and follow-up requests
+- stakeholder notes or acceptance checklists for product feedback
 
-Use existing team channels only, such as:
-
-- pull request review comments for code-specific issues
-- issue tracker items for defects or follow-up requests
-- stakeholder notes or acceptance checklist comments for product feedback
-
-### 4.3 Review cadence
+### 5.3 Feedback handling rules
 
 - blockers must be reviewed within one business day
-- accepted scope changes must be turned into tracked follow-up work
-- deferred issues must include owner, rationale, and target milestone
+- accepted non-blocking improvements must become tracked follow-up work
+- deferred issues must record owner, rationale, and target milestone
+- rejected UAT findings may not be silently downgraded without approver agreement
+
+### 5.4 Success criteria
+
+- feedback is gathered inside a defined time window
+- every significant finding receives a clear disposition
+- no final approval occurs while stakeholder feedback is still unreviewed
 
 ---
 
-## PHASE 5 — FINAL REVIEW PROCESS
+## UPDATED PHASE 6 — FINAL REVIEW + PROJECT CLOSEOUT
 
-### 5.1 Required participants
+```bash
+# ── 6.1 Final review checklist ──────────────────────────────────────────────────
+echo "── 6.1 Final review checklist ──"
+echo "  1) Confirm implementation scope matches the approved playbook"
+echo "  2) Review Phase 2 validation evidence"
+echo "  3) Review documentation completeness"
+echo "  4) Review open risks and deferred items"
+echo "  5) Approve completion or return work to implementation"
+```
+
+### 6.2 Required participants
 
 - implementation owner
 - repository maintainer or technical reviewer
 - stakeholder, product owner, or designated approver
 
-### 5.2 Final review agenda
-
-1. Confirm implementation scope matches the approved playbook direction.
-2. Review validation evidence: `pnpm check`, `pnpm build`, smoke tests, and benchmarks.
-3. Confirm documentation is complete and usable by both operators and end users.
-4. Review unresolved risks, limitations, and explicitly deferred items.
-5. Approve release, request follow-up changes, or reject completion.
-
-### 5.3 Final review criteria
+### 6.3 Final review criteria
 
 The project can be marked complete only when:
 
-- all completion criteria in Phase 1 are met
-- all production gates in Phase 2 are passed
-- all required documentation in Phase 3 is present
-- feedback in Phase 4 has been reviewed and dispositioned
-- final participants agree the delivered SvelteKit + `markitdown` workflow is ready for its intended environment
+- all Phase 1 readiness checks have passed
+- all Phase 2 validation criteria and benchmarks have passed
+- all Phase 3 production gates have passed
+- all Phase 4 documentation requirements are present and current
+- all Phase 5 feedback has been reviewed and dispositioned
+- final reviewers agree the SvelteKit + `markitdown` workflow is ready for its intended environment
 
-If any criterion fails, move the work back to implementation or validation as appropriate rather than closing the project.
+### 6.4 Closeout rule
+
+If any criterion fails, the work returns to implementation or validation. Do not close the project on partial acceptance.
+
+### 6.5 Success criteria
+
+- completion is based on evidence, not assumption
+- approvers and release owners are explicitly identified
+- the delivered project is operationally ready, documented, and accepted
