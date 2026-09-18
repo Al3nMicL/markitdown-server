@@ -360,45 +360,109 @@ echo "OK: Phase 2 — Python environment and markitdown ready"
 | `python3-pip` | — | — | **Removed** — replaced by `uv` |
 | `python3-venv` | — | — | **Removed** — replaced by `uv` |
 
-# PHASE 3 — NODE.JS PROJECT Spec
+# PHASE 3 — SVELTEKIT INTEGRATION SPEC
 
 cd "$SERVICE_DIR"
 
-## 3.1 Ensure required dependencies are present in the existing package.json
+## 3.1 Keep this as a SvelteKit app; do not create a standalone Express server
+
+: <<'COMMENT'
+This repo is already a SvelteKit app. The service should live in a route endpoint,
+not in a separate node server.js process, unless you intentionally switch to adapter-node.
+The main idea is: use the SvelteKit runtime, then call the markitdown binary from a route.
+COMMENT
+
 node <<'EOF'
 const fs = require('fs');
 const pkgPath = 'package.json';
-const required = {
-  express: '^4.19.2',
-  multer: '^1.4.5-lts.1',
-  uuid: '^9.0.1'
-};
 
 let pkg = {};
 if (fs.existsSync(pkgPath)) {
   pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 }
 
-pkg.name ??= 'markitdown-service';
-pkg.version ??= '1.0.0';
-pkg.description ??= 'Local file-to-markdown conversion service';
-pkg.main ??= 'server.js';
+pkg.name ??= 'markitdown-server';
+pkg.version ??= '0.0.1';
+pkg.private ??= true;
+pkg.type ??= 'module';
 pkg.scripts ??= {};
-pkg.scripts.start ??= 'node server.js';
-pkg.scripts.dev ??= 'node --watch server.js';
-pkg.dependencies ??= {};
-
-for (const [dep, version] of Object.entries(required)) {
-  if (!pkg.dependencies[dep]) {
-    pkg.dependencies[dep] = version;
-  }
-}
+pkg.scripts.dev ??= 'vite dev --host 0.0.0.0';
+pkg.scripts.build ??= 'vite build';
+pkg.scripts.preview ??= 'vite preview --host 0.0.0.0';
+pkg.scripts.check ??= 'svelte-kit sync && svelte-check --tsconfig ./tsconfig.json';
+pkg.devDependencies ??= {};
 
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
 EOF
 
-# 3.2 Update required Node dependencies
-pnpm install
+: <<'COMMENT'
+Optional only for standalone Node deployment:
+- add @sveltejs/adapter-node if you want a custom production server outside normal SvelteKit flow
+- change the Vite config from adapter-auto to adapter-node when runtime server behavior is required
+- keep the app server logic out of a separate Express app unless the architecture intentionally changes away from SvelteKit
 
-# 3.3 Verify node_modules present
-ls node_modules | grep -E "express|multer|uuid" && echo "OK: pnpm deps installed"
+Standard SvelteKit usage should instead implement the conversion logic in a route endpoint such as:
+- src/routes/api/convert/+server.ts
+- accept multipart form data with request.formData()
+- validate file presence and max size
+- write a temp input file and spawn MARKITDOWN_BIN (.venv/bin/markitdown)
+- capture stdout/stderr and return a markdown Response
+- clean up temp files after conversion
+
+Example shape:
+
+import { json } from '@sveltejs/kit';
+import { writeFile, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+
+export const POST = async ({ request }) => {
+  const form = await request.formData();
+  const file = form.get('file');
+  if (!(file instanceof File)) {
+    return json({ error: 'No file uploaded' }, { status: 400 });
+  }
+
+  const inputPath = join(tmpdir(), `${Date.now()}-${file.name}`);
+  const inputBytes = Buffer.from(await file.arrayBuffer());
+  await writeFile(inputPath, inputBytes);
+
+  const markitdown = process.env.MARKITDOWN_BIN || '.venv/bin/markitdown';
+  const child = spawn(markitdown, [inputPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const stdout = [];
+  const stderr = [];
+
+  child.stdout.on('data', chunk => stdout.push(Buffer.from(chunk)));
+  child.stderr.on('data', chunk => stderr.push(Buffer.from(chunk)));
+
+  const exitCode = await new Promise(resolve => child.on('close', resolve));
+  await unlink(inputPath).catch(() => {});
+
+  if (exitCode !== 0) {
+    return json({ error: 'Conversion failed', details: Buffer.concat(stderr).toString() }, { status: 500 });
+  }
+
+  return new Response(Buffer.concat(stdout), {
+    headers: { 'Content-Type': 'text/markdown; charset=utf-8' }
+  });
+};
+COMMENT
+
+## 3.5 Add environment guidance for the binary path
+cat > .env.example <<'EOF'
+PORT=3000
+MARKITDOWN_BIN=.venv/bin/markitdown
+MAX_FILE_MB=100
+EOF
+
+# 3.6 Validate the project still boots as a SvelteKit app
+pnpm install
+pnpm check
+pnpm build
+
+# 3.7 Success criteria
+- no Express-specific dependency is required for the normal app flow
+- the conversion lives in an API route, not in a standalone server.js
+- if production deployment requires it, adapter-node is used instead of adapter-auto
+- the markitdown binary is resolved via environment configuration and runs from the project venv
