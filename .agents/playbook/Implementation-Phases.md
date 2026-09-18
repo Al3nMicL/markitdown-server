@@ -631,3 +631,460 @@ pnpm build
 - markitdown is invoked from the project venv path
 - conversion result is returned as markdown to the browser
 - no standalone Express server is required for the core use case
+
+---
+
+# PHASE 5 — SVELTEKIT UI/ Markitdown Uploader DESIGN GUIDELINE
+
+: <<'COMMENT'
+This implementation phase is a design guideline only.
+It is not the final implementation contract for the assigned engineering agent.
+The final design may differ based on the actual route structure, UI requirements, and repository conventions chosen by that agent.
+COMMENT
+
+: <<'COMMENT'
+This phase intentionally keeps the app aligned with standard SvelteKit patterns:
+- use src/routes and route endpoints for upload conversion logic
+- keep runtime behavior inside the SvelteKit app lifecycle
+- use a browser form or JS client to submit multipart form data
+- invoke the markitdown binary from the project venv path
+- return markdown in a Response or trigger a download from the client
+
+The content below is guidance only and should be treated as a starting point, not a lock-in design.
+COMMENT
+
+cat > "$SERVICE_DIR/public/index.html" << 'HTMLEOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>markitdown — File to Markdown</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    header p {
+      margin-top: 0.4rem;
+      color: #94a3b8;
+      font-size: 0.95rem;
+    }
+
+    .card {
+      background: #1e2130;
+      border: 1px solid #2d3148;
+      border-radius: 16px;
+      padding: 2rem;
+      width: 100%;
+      max-width: 640px;
+    }
+
+    #drop-zone {
+      border: 2px dashed #3d4270;
+      border-radius: 12px;
+      padding: 3rem 2rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+    }
+
+    #drop-zone.dragover {
+      border-color: #6366f1;
+      background: rgba(99,102,241,0.08);
+    }
+
+    #drop-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    .drop-icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+    .drop-label { font-size: 1rem; color: #cbd5e1; }
+    .drop-label span { color: #818cf8; text-decoration: underline; }
+    .drop-hint { margin-top: 0.5rem; font-size: 0.8rem; color: #64748b; }
+
+    #file-info {
+      display: none;
+      align-items: center;
+      gap: 0.75rem;
+      background: #252840;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-top: 1rem;
+    }
+
+    #file-info.visible { display: flex; }
+    .file-icon { font-size: 1.5rem; }
+    .file-details { flex: 1; overflow: hidden; }
+    .file-name {
+      font-size: 0.9rem;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .file-size { font-size: 0.75rem; color: #64748b; }
+
+    #convert-btn {
+      display: block;
+      width: 100%;
+      margin-top: 1.25rem;
+      padding: 0.85rem;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+
+    #convert-btn:hover:not(:disabled) { opacity: 0.9; }
+    #convert-btn:active:not(:disabled) { transform: scale(0.99); }
+    #convert-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #progress-wrap {
+      display: none;
+      margin-top: 1rem;
+    }
+
+    #progress-wrap.visible { display: block; }
+
+    .progress-bar-bg {
+      background: #2d3148;
+      border-radius: 99px;
+      height: 6px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #6366f1, #8b5cf6);
+      border-radius: 99px;
+      width: 0%;
+      transition: width 0.3s ease;
+      animation: indeterminate 1.5s ease-in-out infinite;
+    }
+
+    @keyframes indeterminate {
+      0%   { width: 0%; margin-left: 0%; }
+      50%  { width: 60%; margin-left: 20%; }
+      100% { width: 0%; margin-left: 100%; }
+    }
+
+    .progress-label {
+      margin-top: 0.5rem;
+      font-size: 0.82rem;
+      color: #94a3b8;
+      text-align: center;
+    }
+
+    #status {
+      display: none;
+      align-items: center;
+      gap: 0.6rem;
+      margin-top: 1rem;
+      padding: 0.8rem 1rem;
+      border-radius: 8px;
+      font-size: 0.88rem;
+    }
+
+    #status.visible { display: flex; }
+    #status.success { background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.3); color: #4ade80; }
+    #status.error   { background: rgba(239,68,68,0.12);  border: 1px solid rgba(239,68,68,0.3);  color: #f87171; }
+
+    #download-btn {
+      display: none;
+      width: 100%;
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background: rgba(34,197,94,0.15);
+      color: #4ade80;
+      font-size: 0.95rem;
+      font-weight: 600;
+      border: 1px solid rgba(34,197,94,0.3);
+      border-radius: 10px;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+
+    #download-btn:hover { background: rgba(34,197,94,0.25); }
+    #download-btn.visible { display: block; }
+
+    .formats {
+      margin-top: 2rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid #2d3148;
+    }
+
+    .formats h3 {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #64748b;
+      margin-bottom: 0.75rem;
+    }
+
+    .format-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    .tag {
+      background: #252840;
+      color: #94a3b8;
+      border: 1px solid #3d4270;
+      border-radius: 4px;
+      padding: 0.2rem 0.55rem;
+      font-size: 0.75rem;
+      font-family: monospace;
+    }
+
+    #reset-link {
+      display: none;
+      margin-top: 0.75rem;
+      text-align: center;
+      font-size: 0.82rem;
+      color: #64748b;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    #reset-link.visible { display: block; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>⬡ markitdown</h1>
+    <p>Drop any file — get clean Markdown back</p>
+  </header>
+
+  <div class="card">
+    <div id="drop-zone">
+      <input type="file" id="file-input" />
+      <div class="drop-icon">📄</div>
+      <div class="drop-label">Drop file here or <span>browse</span></div>
+      <div class="drop-hint">PDF · DOCX · PPTX · XLSX · HTML · images · audio · ZIP · and more</div>
+    </div>
+
+    <div id="file-info">
+      <div class="file-icon" id="file-icon">📎</div>
+      <div class="file-details">
+        <div class="file-name" id="file-name">—</div>
+        <div class="file-size" id="file-size">—</div>
+      </div>
+    </div>
+
+    <button id="convert-btn" disabled>Convert to Markdown</button>
+
+    <div id="progress-wrap">
+      <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
+      <div class="progress-label" id="progress-label">Converting…</div>
+    </div>
+
+    <div id="status"></div>
+    <a id="download-btn" download>⬇ Download Markdown</a>
+    <div id="reset-link">Convert another file</div>
+
+    <div class="formats">
+      <h3>Supported Input Formats</h3>
+      <div class="format-tags">
+        <span class="tag">.pdf</span>
+        <span class="tag">.docx</span>
+        <span class="tag">.pptx</span>
+        <span class="tag">.xlsx</span>
+        <span class="tag">.xls</span>
+        <span class="tag">.html</span>
+        <span class="tag">.htm</span>
+        <span class="tag">.csv</span>
+        <span class="tag">.json</span>
+        <span class="tag">.xml</span>
+        <span class="tag">.png</span>
+        <span class="tag">.jpg</span>
+        <span class="tag">.mp3</span>
+        <span class="tag">.wav</span>
+        <span class="tag">.zip</span>
+        <span class="tag">.txt</span>
+        <span class="tag">.md</span>
+        <span class="tag">+ more</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const fileInfo = document.getElementById('file-info');
+    const fileNameEl = document.getElementById('file-name');
+    const fileSizeEl = document.getElementById('file-size');
+    const fileIconEl = document.getElementById('file-icon');
+    const convertBtn = document.getElementById('convert-btn');
+    const progressWrap = document.getElementById('progress-wrap');
+    const statusEl = document.getElementById('status');
+    const downloadBtn = document.getElementById('download-btn');
+    const resetLink = document.getElementById('reset-link');
+
+    let selectedFile = null;
+
+    const EXT_ICONS = {
+      pdf:'📕', docx:'📘', doc:'📘', pptx:'📙', ppt:'📙',
+      xlsx:'📗', xls:'📗', csv:'📊', html:'🌐', htm:'🌐',
+      png:'🖼️', jpg:'🖼️', jpeg:'🖼️', gif:'🖼️', webp:'🖼️',
+      mp3:'🎵', wav:'🎵', ogg:'🎵', mp4:'🎬',
+      zip:'🗜️', tar:'🗜️', gz:'🗜️',
+      json:'📋', xml:'📋', txt:'📄', md:'📝'
+    };
+
+    function iconForFile(name) {
+      const ext = name.split('.').pop().toLowerCase();
+      return EXT_ICONS[ext] || '📎';
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / 1048576).toFixed(1) + ' MB';
+    }
+
+    function setFile(file) {
+      selectedFile = file;
+      fileNameEl.textContent = file.name;
+      fileSizeEl.textContent = formatBytes(file.size);
+      fileIconEl.textContent = iconForFile(file.name);
+      fileInfo.classList.add('visible');
+      convertBtn.disabled = false;
+      clearStatus();
+    }
+
+    function clearStatus() {
+      statusEl.className = '';
+      statusEl.style.display = 'none';
+      statusEl.textContent = '';
+      downloadBtn.classList.remove('visible');
+      resetLink.classList.remove('visible');
+      progressWrap.classList.remove('visible');
+    }
+
+    function showStatus(type, msg) {
+      statusEl.className = `visible ${type}`;
+      statusEl.textContent = type === 'success' ? '✓ ' + msg : '✗ ' + msg;
+    }
+
+    dropZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if (file) setFile(file);
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) setFile(fileInput.files[0]);
+    });
+
+    convertBtn.addEventListener('click', async () => {
+      if (!selectedFile) return;
+
+      convertBtn.disabled = true;
+      clearStatus();
+      progressWrap.classList.add('visible');
+
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+
+      try {
+        const res = await fetch('/convert', { method: 'POST', body: formData });
+
+        progressWrap.classList.remove('visible');
+
+        if (!res.ok) {
+          let errMsg = `Server error ${res.status}`;
+          try {
+            const j = await res.json();
+            errMsg = j.error + (j.details ? ': ' + j.details : '');
+          } catch (_) {}
+          showStatus('error', errMsg);
+          convertBtn.disabled = false;
+          return;
+        }
+
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename="?([^";\n]+)"?/);
+        const filename = match ? match[1] : selectedFile.name.replace(/\.[^.]+$/, '') + '.md';
+
+        const url = URL.createObjectURL(blob);
+        downloadBtn.href = url;
+        downloadBtn.download = filename;
+        downloadBtn.textContent = `⬇ Download ${filename}`;
+        downloadBtn.classList.add('visible');
+
+        showStatus('success', `Converted successfully — ${filename}`);
+        resetLink.classList.add('visible');
+      } catch (err) {
+        progressWrap.classList.remove('visible');
+        showStatus('error', 'Network error — is the server running?');
+        convertBtn.disabled = false;
+      }
+    });
+
+    resetLink.addEventListener('click', () => {
+      selectedFile = null;
+      fileInput.value = '';
+      fileInfo.classList.remove('visible');
+      convertBtn.disabled = true;
+      clearStatus();
+    });
+  </script>
+</body>
+</html>
+HTMLEOF
+
+echo "OK: index.html written"
+wc -l "$SERVICE_DIR/public/index.html"
+
+: <<'COMMENT'
+This design example is intentionally illustrative only.
+The exact final implementation will be determined by the UI design agent assigned to the work.
+This phase should be read as a product reference and not as a fixed implementation specification.
+COMMENT
+
