@@ -344,7 +344,7 @@ echo "OK: Phase 2 — Python environment and markitdown ready"
 
 ---
 
-## DEPENDENCY DECISION REFERENCE
+### DEPENDENCY DECISION REFERENCE
 
 | Package | Check method | Install method | Skip if installed |
 |---|---|---|---|
@@ -449,20 +449,185 @@ export const POST = async ({ request }) => {
 };
 COMMENT
 
-## 3.5 Add environment guidance for the binary path
+## 3.2 Add environment guidance for the binary path
 cat > .env.example <<'EOF'
 PORT=3000
 MARKITDOWN_BIN=.venv/bin/markitdown
 MAX_FILE_MB=100
 EOF
 
-# 3.6 Validate the project still boots as a SvelteKit app
+## 3.3 Validate the project still boots as a SvelteKit app
 pnpm install
 pnpm check
 pnpm build
 
-# 3.7 Success criteria
+## 3.4 Success criteria
 - no Express-specific dependency is required for the normal app flow
 - the conversion lives in an API route, not in a standalone server.js
 - if production deployment requires it, adapter-node is used instead of adapter-auto
 - the markitdown binary is resolved via environment configuration and runs from the project venv
+
+---
+
+# PHASE 4 — SVELTEKIT FILE CONVERSION ROUTE + UI
+
+: <<'COMMENT'
+This is the normal app flow for this repo.
+Standard SvelteKit does not require a separate Express server.js.
+The upload endpoint should live inside src/routes and call the markitdown binary directly.
+COMMENT
+
+: <<'COMMENT'
+Standard SvelteKit flow for this project:
+- keep the application in the SvelteKit runtime
+- add a route at src/routes/api/convert/+server.ts
+- parse multipart upload with request.formData()
+- invoke the Python venv binary at .venv/bin/markitdown
+- return markdown as a Response object
+- keep server.js, express, multer, and app.listen() only as optional standalone examples
+COMMENT
+
+mkdir -p "$SERVICE_DIR/src/routes/api/convert"
+
+cat > "$SERVICE_DIR/src/routes/api/convert/+server.ts" <<'EOF'
+import { json } from '@sveltejs/kit';
+import { spawn } from 'node:child_process';
+import { writeFile, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const MAX_FILE_MB = Number(process.env.MAX_FILE_MB || 100);
+const MARKITDOWN_BIN = process.env.MARKITDOWN_BIN || join(process.cwd(), '.venv', 'bin', 'markitdown');
+
+export const POST = async ({ request }) => {
+  const formData = await request.formData();
+  const file = formData.get('file');
+
+  if (!(file instanceof File)) {
+    return json({ error: 'No file uploaded' }, { status: 400 });
+  }
+
+  if (file.size > MAX_FILE_MB * 1024 * 1024) {
+    return json({ error: `File exceeds ${MAX_FILE_MB}MB limit` }, { status: 413 });
+  }
+
+  const tempInput = join(tmpdir(), `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
+  await writeFile(tempInput, Buffer.from(await file.arrayBuffer()));
+
+  try {
+    const child = spawn(MARKITDOWN_BIN, [tempInput], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+
+    child.stdout.on('data', chunk => stdout.push(Buffer.from(chunk)));
+    child.stderr.on('data', chunk => stderr.push(Buffer.from(chunk)));
+
+    const exitCode = await new Promise<number>(resolve => child.on('close', resolve));
+
+    if (exitCode !== 0) {
+      const detail = Buffer.concat(stderr).toString().trim();
+      return json({ error: 'Conversion failed', details: detail }, { status: 500 });
+    }
+
+    const markdown = Buffer.concat(stdout);
+    if (!markdown.length) {
+      return json({ error: 'markitdown produced empty output' }, { status: 422 });
+    }
+
+    return new Response(markdown, {
+      headers: {
+        'Content-Type': 'text/markdown; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${file.name.replace(/\.[^.]+$/, '')}.md"`
+      }
+    });
+  } finally {
+    await unlink(tempInput).catch(() => {});
+  }
+};
+EOF
+
+cat > "$SERVICE_DIR/src/routes/+page.svelte" <<'EOF'
+<script lang="ts">
+  let uploading = false;
+  let error = '';
+  let success = '';
+
+  async function handleSubmit(event: SubmitEvent) {
+    event.preventDefault();
+    const form = event.currentTarget as HTMLFormElement;
+    const data = new FormData(form);
+    const file = data.get('file');
+
+    if (!(file instanceof File) || !file.size) {
+      error = 'Please select a file to convert.';
+      success = '';
+      return;
+    }
+
+    uploading = true;
+    error = '';
+    success = '';
+
+    try {
+      const response = await fetch('/api/convert', {
+        method: 'POST',
+        body: data
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || `Request failed with ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'converted.md';
+      link.click();
+      URL.revokeObjectURL(url);
+
+      success = 'Conversion complete.';
+      form.reset();
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Conversion failed.';
+    } finally {
+      uploading = false;
+    }
+  }
+</script>
+
+<h1>MarkItDown Converter</h1>
+
+<form on:submit={handleSubmit}>
+  <input type="file" name="file" />
+  <button type="submit" disabled={uploading}>
+    {uploading ? 'Converting...' : 'Convert to Markdown'}
+  </button>
+</form>
+
+{#if error}
+  <p style="color: red">{error}</p>
+{/if}
+
+{#if success}
+  <p style="color: green">{success}</p>
+{/if}
+EOF
+
+## 4.1 Validate the SvelteKit route works in normal runtime
+pnpm install
+pnpm dev --host 0.0.0.0
+
+## 4.2 Production check
+pnpm build
+
+## 4.3 Success criteria
+- the app runs under standard SvelteKit server lifecycle
+- file upload is handled in src/routes/api/convert/+server.ts
+- markitdown is invoked from the project venv path
+- conversion result is returned as markdown to the browser
+- no standalone Express server is required for the core use case
