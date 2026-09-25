@@ -60,7 +60,7 @@ Production approval requires explicit sign-off from:
 
 - all four production gates pass without open blockers
 - sign-off ownership is explicit rather than assumed
-- no release proceeds on the basis of “works on my machine” validation alone
+- no release proceeds without validation on each supported platform
 
 ---
 
