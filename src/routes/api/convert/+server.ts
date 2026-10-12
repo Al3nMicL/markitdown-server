@@ -7,6 +7,7 @@ import { getMaxFileBytes } from '$lib/server/upload-limit';
 import type { RequestHandler } from './$types';
 
 const BYTES_PER_MB = 1024 * 1024;
+const MAX_MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
 const MAX_CONVERTER_OUTPUT_BYTES = 50 * BYTES_PER_MB;
 const CONVERTER_TIMEOUT_MS = 60_000;
 
@@ -99,6 +100,16 @@ function convert(inputPath: string): Promise<Buffer> {
 }
 
 export const POST: RequestHandler = async ({ request }) => {
+	const maxBytes = getMaxFileBytes();
+	const contentLength = request.headers.get('content-length');
+	if (
+		contentLength &&
+		/^\d+$/.test(contentLength) &&
+		Number(contentLength) > maxBytes + MAX_MULTIPART_OVERHEAD_BYTES
+	) {
+		return json({ error: 'The selected file exceeds the upload size limit.' }, { status: 413 });
+	}
+
 	let formData: FormData;
 	try {
 		formData = await request.formData();
@@ -119,7 +130,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json({ error: 'Choose a nonempty file to convert.' }, { status: 400 });
 	}
 
-	if (file.size > getMaxFileBytes()) {
+	if (file.size > maxBytes) {
 		return json({ error: 'The selected file exceeds the upload size limit.' }, { status: 413 });
 	}
 
