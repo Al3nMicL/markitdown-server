@@ -3,9 +3,9 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
+import { getMaxFileBytes } from '$lib/server/upload-limit';
 import type { RequestHandler } from './$types';
 
-const DEFAULT_MAX_FILE_MB = 100;
 const BYTES_PER_MB = 1024 * 1024;
 const MAX_CONVERTER_OUTPUT_BYTES = 50 * BYTES_PER_MB;
 const CONVERTER_TIMEOUT_MS = 60_000;
@@ -16,15 +16,6 @@ class ConversionFailure extends Error {
 	constructor(readonly kind: ConversionFailureKind) {
 		super(kind);
 	}
-}
-
-function maxUploadBytes(): number {
-	const configured = Number(process.env.MAX_FILE_MB);
-	const valid =
-		Number.isFinite(configured) &&
-		configured > 0 &&
-		configured <= Number.MAX_SAFE_INTEGER / BYTES_PER_MB;
-	return Math.floor((valid ? configured : DEFAULT_MAX_FILE_MB) * BYTES_PER_MB);
 }
 
 function converterPath(): string {
@@ -128,7 +119,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json({ error: 'Choose a nonempty file to convert.' }, { status: 400 });
 	}
 
-	if (file.size > maxUploadBytes()) {
+	if (file.size > getMaxFileBytes()) {
 		return json({ error: 'The selected file exceeds the upload size limit.' }, { status: 413 });
 	}
 
