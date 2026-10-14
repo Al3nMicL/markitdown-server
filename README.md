@@ -1,42 +1,58 @@
-# sv
+# MarkItDown Server
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+A local light-weight SvelteKit powered web app for converting uploaded files to Markdown, using Microsoft's
+[MarkItDown](https://github.com/microsoft/markitdown) package.
 
-## Creating a project
+## Prerequisites
 
-If you're seeing this, you've probably already done this step. Congrats!
+- Node.js 20.19+ or 22.12+
+- [pnpm](https://pnpm.io/installation)
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
-```sh
-# create a new project
-npx sv create my-app
-```
+## Setup
 
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-pnpm dlx sv@0.17.0 create --template minimal --types ts --install pnpm .
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+From the repository root, install the JavaScript dependencies and create a
+project-local Python environment with MarkItDown:
 
 ```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+pnpm install
+uv venv --python=3.12 .venv
+uv pip install --python .venv/bin/python 'markitdown[all]'
 ```
 
-## Building
-
-To create a production version of your app:
+The app invokes `.venv/bin/markitdown` directly; the Python environment does not
+need to be activated. Check that the CLI is installed with:
 
 ```sh
-npm run build
+.venv/bin/markitdown --version
 ```
 
-You can preview the production build with `npm run preview`.
+By default, uploads are limited to 100 MB. To change the limit or converter
+location, copy `.env.example` to `.env` and edit `MAX_FILE_MB` or
+`MARKITDOWN_BIN`. Relative converter paths are resolved from the repository
+root. The `.env` file is ignored by Git.
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+## Development
+
+Start the SvelteKit development server:
+
+```sh
+pnpm dev
+```
+
+Open the local URL printed by Vite, usually <http://localhost:5173>. To use the
+port documented for local validation instead:
+
+```sh
+pnpm exec vite dev --host 127.0.0.1 --port 3000
+```
+
+## Checks and build
+
+```sh
+pnpm check
+pnpm build
+```
+
+Preview a production build with `pnpm preview`.
