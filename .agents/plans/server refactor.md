@@ -2,7 +2,7 @@
 
 ## Objective
 
-Prepare a focused follow-up PR to keep upload-size limit calculations in `src/lib/server/upload-limit.ts`.
+Code then prepare a focused follow-up PR to keep upload-size limit calculations in `src/lib/server/upload-limit.ts`.
 
 ## Current behavior
 
@@ -12,17 +12,18 @@ Prepare a focused follow-up PR to keep upload-size limit calculations in `src/li
 
 ## Scope
 
-- In the follow-up PR after the current PR is merged, review the route's `maxBytes` checks and consolidate any remaining upload-size threshold calculation in `upload-limit.ts`.
-- Keep multipart parsing, request validation, and HTTP response handling in the route.
+- The target file is `src/routes/api/convert/+server.ts`
+- In this follow-up PR, review the route's `maxBytes` checks and consolidate any remaining upload-size threshold calculations into `upload-limit.ts`.
+- Keep multipart parsing, request validation, and HTTP response handling as-is in the route.
 - Avoid duplicating configuration or changing the configured maximum file size behavior.
-- Do not modify the current route or helper as part of this planning task.
+
 
 ## Implementation sequence
 
 1. Confirm the file-size and multipart request-size limits and their intended relationship.
 2. Add or adjust a focused helper in `upload-limit.ts` for any shared threshold calculation.
 3. Update the route to use the helper while preserving both early `Content-Length` rejection and parsed-file-size validation.
-4. Add or update tests for configured limits, multipart overhead, and boundary values.
+4. Add or update tests for configured limits, multipart overhead, and boundary values. Create relevant testing strucures according to Svelte framework conventions. These tests will be run by the user, _do not_ try to run them yourself in the sandbox environment.
 
 ## Acceptance criteria
 

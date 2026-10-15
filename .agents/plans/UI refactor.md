@@ -2,7 +2,7 @@
 
 ## Objective
 
-Prepare a focused follow-up PR to decompose the conversion page UI logic into reusable Svelte components.
+Code then prepare a focused follow-up PR to decompose the conversion page UI logic into reusable Svelte components.
 
 ## Scope
 
@@ -11,7 +11,7 @@ Prepare a focused follow-up PR to decompose the conversion page UI logic into re
 - Extract loading, error, and success feedback into `ConversionStatus.svelte`.
 - Extract the successful conversion presentation and download actions into `DownloadCard.svelte`.
 - Preserve the current upload, conversion, download, reset, and accessibility behavior.
-- Do not modify the current page or create component files as part of this planning task; implement only in the follow-up PR.
+- Do not modify the current page, only create component files as part of this planning task; implementation will happen once the follow-up PR is reviewed.
 
 ## Implementation sequence
 
