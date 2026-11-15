@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import ConversionStatus from '$lib/components/ConversionStatus.svelte';
+	import DownloadCard from '$lib/components/DownloadCard.svelte';
+	import FileDropzone from '$lib/components/FileDropzone.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
-	let fileInput: HTMLInputElement;
 	let selectedFile = $state<File | null>(null);
 	let isConverting = $state(false);
 	let errorMessage = $state('');
@@ -24,20 +26,10 @@
 		succeeded = false;
 	}
 
-	function selectFile(file: File | null): void {
+	function selectFile(file: File | null, selectionError?: string): void {
 		clearResult();
 		selectedFile = file;
-	}
-
-	function handleFileChange(event: Event): void {
-		const input = event.currentTarget;
-		if (input instanceof HTMLInputElement) selectFile(input.files?.[0] ?? null);
-	}
-
-	function formatSize(size: number): string {
-		if (size < 1024) return `${size} bytes`;
-		if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-		return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+		errorMessage = selectionError ?? '';
 	}
 
 	function safeDownloadFilename(disposition: string | null): string {
@@ -59,7 +51,6 @@
 
 	function reset(): void {
 		selectFile(null);
-		if (fileInput) fileInput.value = '';
 	}
 
 	async function convertFile(event: SubmitEvent): Promise<void> {
@@ -135,34 +126,14 @@
 		<p class="intro">Choose one file and download its Markdown conversion.</p>
 
 		<form onsubmit={convertFile}>
-			<label for="file">Choose a file</label>
-			<input
-				bind:this={fileInput}
-				id="file"
-				name="file"
-				type="file"
-				onchange={handleFileChange}
+			<FileDropzone
+				selectedFile={selectedFile}
+				maxFileMb={data.maxFileMb}
 				disabled={isConverting}
-				aria-describedby="file-help"
+				onFileSelect={selectFile}
 			/>
-			<p id="file-help" class="help">
-				Maximum file size: {data.maxFileMb} MB. Supported formats depend on the installed converter.
-			</p>
 
-			{#if selectedFile}
-				<div class="selected-file" aria-live="polite">
-					<span class="file-name">{selectedFile.name}</span>
-					<span>{formatSize(selectedFile.size)}</span>
-				</div>
-			{/if}
-
-			{#if errorMessage}
-				<p class="message error" role="alert">{errorMessage}</p>
-			{:else if succeeded}
-				<p class="message success" role="status">Conversion complete. Your Markdown file is ready.</p>
-			{:else if isConverting}
-				<p class="message" role="status">Converting your file…</p>
-			{/if}
+			<ConversionStatus {errorMessage} {succeeded} {isConverting} />
 
 			<div class="actions">
 				<button type="submit" disabled={!selectedFile || isConverting || succeeded}>
@@ -177,10 +148,7 @@
 		</form>
 
 		{#if succeeded && downloadUrl}
-			<a class="download" href={downloadUrl} download={downloadFilename}>
-				Download {downloadFilename}
-			</a>
-			<button class="text-button" type="button" onclick={reset}>Convert another file</button>
+			<DownloadCard {downloadUrl} {downloadFilename} onReset={reset} />
 		{/if}
 	</section>
 </main>
@@ -240,69 +208,6 @@
 		gap: 0.75rem;
 	}
 
-	label {
-		font-weight: 650;
-	}
-
-	input[type="file"] {
-		width: 100%;
-		min-width: 0;
-		padding: 0.75rem;
-		border: 1px solid #b8c4cf;
-		border-radius: 0.5rem;
-		background: #fff;
-		color: inherit;
-	}
-
-	input[type="file"]::file-selector-button {
-		margin-right: 0.75rem;
-		padding: 0.5rem 0.75rem;
-		border: 0;
-		border-radius: 0.35rem;
-		background: #eaf1f7;
-		color: #183e5f;
-		font: inherit;
-		font-weight: 600;
-		cursor: pointer;
-	}
-
-	.help {
-		margin: 0;
-		color: #566474;
-		font-size: 0.9rem;
-		line-height: 1.45;
-	}
-
-	.selected-file {
-		display: flex;
-		flex-wrap: wrap;
-		justify-content: space-between;
-		gap: 0.5rem 1rem;
-		padding: 0.8rem 0.9rem;
-		border-radius: 0.5rem;
-		background: #f2f5f8;
-		color: #344252;
-		font-size: 0.92rem;
-	}
-
-	.file-name {
-		overflow-wrap: anywhere;
-		font-weight: 600;
-	}
-
-	.message {
-		margin: 0.25rem 0;
-		line-height: 1.5;
-	}
-
-	.error {
-		color: #a12424;
-	}
-
-	.success {
-		color: #17643d;
-	}
-
 	.actions {
 		display: flex;
 		flex-wrap: wrap;
@@ -310,8 +215,7 @@
 		margin-top: 0.5rem;
 	}
 
-	button,
-	.download {
+	button {
 		min-height: 2.75rem;
 		padding: 0.7rem 1rem;
 		border: 0;
@@ -336,26 +240,9 @@
 		color: #274157;
 	}
 
-	.download {
-		display: inline-flex;
-		align-items: center;
-		margin-top: 1.25rem;
-		background: #17643d;
-	}
-
-	.text-button {
-		display: block;
-		margin-top: 0.75rem;
-		padding-inline: 0;
-		background: transparent;
-		color: #174c75;
-		text-align: left;
-		text-decoration: underline;
-	}
-
-	button:focus-visible,
-	input:focus-visible,
-	a:focus-visible {
+	:global(button:focus-visible),
+	:global(input:focus-visible),
+	:global(a:focus-visible) {
 		outline: 3px solid #e19b2d;
 		outline-offset: 3px;
 	}
