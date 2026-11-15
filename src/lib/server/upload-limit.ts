@@ -1,3 +1,5 @@
+import { env } from '$env/dynamic/private';
+
 const DEFAULT_MAX_FILE_MB = 100;
 const BYTES_PER_MB = 1024 * 1024;
 const MAX_MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
@@ -8,7 +10,7 @@ export type UploadLimits = {
 };
 
 export function getMaxFileMb(): number {
-	const configured = Number(process.env.MAX_FILE_MB);
+	const configured = Number(env.MAX_FILE_MB);
 	const valid =
 		Number.isFinite(configured) &&
 		configured > 0 &&
