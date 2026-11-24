@@ -3,11 +3,10 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
-import { getMaxFileBytes } from '$lib/server/upload-limit';
+import { getUploadLimits } from '$lib/server/upload-limit';
 import type { RequestHandler } from './$types';
 
 const BYTES_PER_MB = 1024 * 1024;
-const MAX_MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
 const MAX_CONVERTER_OUTPUT_BYTES = 50 * BYTES_PER_MB;
 const CONVERTER_TIMEOUT_MS = 60_000;
 
@@ -100,12 +99,12 @@ function convert(inputPath: string): Promise<Buffer> {
 }
 
 export const POST: RequestHandler = async ({ request }) => {
-	const maxBytes = getMaxFileBytes();
+	const { maxFileBytes, maxMultipartRequestBytes } = getUploadLimits();
 	const contentLength = request.headers.get('content-length');
 	if (
 		contentLength &&
 		/^\d+$/.test(contentLength) &&
-		Number(contentLength) > maxBytes + MAX_MULTIPART_OVERHEAD_BYTES
+		Number(contentLength) > maxMultipartRequestBytes
 	) {
 		return json({ error: 'The selected file exceeds the upload size limit.' }, { status: 413 });
 	}
@@ -130,7 +129,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json({ error: 'Choose a nonempty file to convert.' }, { status: 400 });
 	}
 
-	if (file.size > maxBytes) {
+	if (file.size > maxFileBytes) {
 		return json({ error: 'The selected file exceeds the upload size limit.' }, { status: 413 });
 	}
 
